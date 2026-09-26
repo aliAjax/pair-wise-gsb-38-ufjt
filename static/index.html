@@ -1,17 +1,125 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>字幕本地化质检</title>
-<style>body{font:15px/1.5 system-ui,sans-serif;max-width:1080px;margin:32px auto;padding:0 18px}input,select,textarea,button{padding:7px;margin:3px}.card{border:1px solid #d9e1e8;border-radius:10px;padding:16px;margin:16px 0}pre,textarea{background:#f5f7f9;padding:12px;overflow:auto;width:100%;box-sizing:border-box}button{cursor:pointer}small{color:#667}</style></head>
-<body><h1>影视字幕本地化质检</h1><p>示例项目已含术语表。分配翻译、时间轴和复核人员后，录入带时间点的字幕与评论，再完成提交、复核、锁定和交付。</p>
-<div class="card"><h2>身份与版本</h2><input id="user" value="alice"><select id="role"><option>owner</option><option>reviewer</option><option>translator</option><option>admin</option></select><label>版本 ID <input id="version" type="number" value="1"></label><button onclick="refresh()">刷新</button><pre id="data">等待刷新…</pre></div>
-<div class="card"><h2>录入字幕</h2><textarea id="cue" rows="5">{"cue_index":1,"start_ms":1000,"end_ms":3000,"text":"海豹出现在冰面上","expected_revision":0}</textarea><button onclick="saveCue()">保存字幕</button><pre id="cueResult"></pre></div>
-<div class="card"><h2>时间点评论</h2><input id="time" type="number" value="1200"><input id="comment" value="请复核这里的术语"><button onclick="addComment()">添加评论</button><pre id="commentResult"></pre></div>
-<div class="card"><h2>状态流转</h2><button onclick="action('submit')">提交复核</button><button onclick="review('approve')">复核通过</button><button onclick="review('reject')">退回修改</button><button onclick="action('lock')">锁定</button><button onclick="action('deliver')">交付</button><pre id="stateResult"></pre></div>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:1120px;margin:32px auto;padding:0 18px;color:#1f2733}
+input,select,textarea,button{padding:7px;margin:3px;font:inherit}
+button{cursor:pointer;border-radius:6px;border:1px solid #9fb3c8;background:#fff}
+button.primary{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
+button.danger{background:#fff5f5;color:#c53030;border-color:#feb2b2}
+.card{border:1px solid #d9e1e8;border-radius:10px;padding:16px;margin:16px 0}
+.card h2{margin-top:0;font-size:17px}
+pre{background:#f5f7f9;padding:12px;overflow:auto;width:100%;box-sizing:border-box;border-radius:6px;font-size:13px}
+textarea{background:#f5f7f9;overflow:auto;width:100%;box-sizing:border-box}
+small{color:#667}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left;vertical-align:top}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:#edf2f7}
+.tag.blocked{background:#fed7d7;color:#9b2c2c}
+.tag.ok{background:#c6f6d5;color:#22543d}
+.muted{color:#718096}
+</style></head>
+<body>
+<h1>影视字幕本地化质检</h1>
+<p>术语表按不可变修订维护；交付时固定当时术语，之后改动不影响旧快照。未交付版本一旦与当前术语冲突，下面会列出具体字幕并挡住提交、复核和交付，改完才能继续。</p>
+
+<div class="card"><h2>身份与项目</h2>
+<input id="user" value="alice" size="10"><select id="role"><option>owner</option><option>reviewer</option><option>translator</option><option>timeline</option><option>admin</option></select>
+<label>项目 ID <input id="projectId" type="number" value="1" size="5"></label>
+<label>版本 ID <input id="version" type="number" value="1" size="5"></label>
+<button class="primary" onclick="refresh()">刷新</button>
+<pre id="data">等待刷新…</pre></div>
+
+<div class="card"><h2>术语维护（保存即生成新修订）</h2>
+<textarea id="glossaryInput" rows="4">{"source_term":"seal","required_translation":"海豹","forbidden_terms":["密封"],"notes":"动物学语境"}</textarea>
+<button class="primary" onclick="saveGlossary()">保存术语</button>
+<pre id="glossaryResult"></pre>
+<h3>术语修订历史</h3><div id="glossaryHistory"><small>刷新后加载</small></div></div>
+
+<div class="card"><h2>遗留术语冲突 <span id="conflictTag" class="tag">—</span></h2>
+<p><small>逐条列出受当前术语表影响的字幕句子。存在冲突时提交复核、复核通过、锁定和交付都会被挡住。</small></p>
+<div id="conflicts"><small>刷新后加载</small></div></div>
+
+<div class="card"><h2>录入字幕</h2>
+<textarea id="cue" rows="5">{"cue_index":1,"start_ms":1000,"end_ms":3000,"text":"海豹出现在冰面上","expected_revision":0}</textarea>
+<button onclick="saveCue()">保存字幕</button> <pre id="cueResult"></pre></div>
+
+<div class="card"><h2>时间点评论</h2>
+<input id="time" type="number" value="1200" size="8"><input id="comment" value="请复核这里的术语" size="30">
+<button onclick="addComment()">添加评论</button> <pre id="commentResult"></pre></div>
+
+<div class="card"><h2>状态流转</h2>
+<button onclick="action('submit')">提交复核</button>
+<button onclick="review('approve')">复核通过</button>
+<button onclick="review('reject')">退回修改</button>
+<button onclick="action('lock')">锁定</button>
+<button class="primary" onclick="action('deliver')">交付</button>
+<button class="danger" onclick="action('reopen')">批准/锁定后退回草稿</button>
+<pre id="stateResult"></pre></div>
+
+<div class="card"><h2>交付后修订</h2>
+<p><small>只能从已交付版本另起修订，字幕内容会复制到新草稿；同一来源只允许一条未完成记录。</small></p>
+<label>父版本 ID <input id="parentId" type="number" size="5"></label>
+<label>语言 <input id="revLang" value="zh-CN" size="6"></label>
+<button onclick="createRevision()">从已交付版本另起修订</button>
+<h3>修订谱系</h3><div id="lineage"><small>刷新后加载</small></div>
+<h3>交付快照</h3><div id="deliveries"><small>刷新后加载</small></div></div>
+
 <script>
-const auth=()=>({'Content-Type':'application/json','X-User':user.value,'X-Role':role.value});
-async function call(url,opts={}){const r=await fetch(url,opts);const j=await r.json();if(!r.ok)throw Error(j.error||r.status);return j}
-async function saveCue(){try{cueResult.textContent=JSON.stringify(await call('/api/versions/'+version.value+'/cues',{method:'POST',headers:auth(),body:cue.value}),null,2)}catch(e){cueResult.textContent=e.message}}
-async function addComment(){try{commentResult.textContent=JSON.stringify(await call('/api/versions/'+version.value+'/comments',{method:'POST',headers:auth(),body:JSON.stringify({time_ms:+time.value,body:comment.value})}),null,2)}catch(e){commentResult.textContent=e.message}}
-async function action(name){try{stateResult.textContent=JSON.stringify(await call('/api/versions/'+version.value+'/'+name,{method:'POST',headers:auth(),body:'{}'}),null,2);refresh()}catch(e){stateResult.textContent=e.message}}
-async function review(decision){try{stateResult.textContent=JSON.stringify(await call('/api/versions/'+version.value+'/review',{method:'POST',headers:auth(),body:JSON.stringify({decision,comment:''})}),null,2);refresh()}catch(e){stateResult.textContent=e.message}}
-async function refresh(){try{const [p,v,c,cm,d]=await Promise.all(['/api/projects','/api/versions','/api/versions/'+version.value+'/cues','/api/versions/'+version.value+'/comments','/api/deliveries'].map(call));data.textContent=JSON.stringify({p,v,c,cm,d},null,2)}catch(e){data.textContent=e.message}}
+const $=id=>document.getElementById(id);
+const auth=()=>({'Content-Type':'application/json','X-User':$('user').value,'X-Role':$('role').value});
+async function call(url,opts={}){const r=await fetch(url,opts);const j=await r.json();if(!r.ok){const e=new Error(j.error||r.status);e.payload=j;throw e}return j}
+function show(el,obj){$(el).textContent=JSON.stringify(obj,null,2)}
+
+async function saveGlossary(){
+  $('glossaryResult').textContent='保存中…';
+  try{const r=await call('/api/projects/'+$('projectId').value+'/glossary',{method:'POST',headers:auth(),body:$('glossaryInput').value});
+    show('glossaryResult',{revision_no:r.revision_no,affected_versions:r.affected_versions});refresh()}
+  catch(e){$('glossaryResult').textContent=e.message+(e.payload&&e.payload.conflicts?'\n'+JSON.stringify(e.payload.conflicts,null,2):'')}
+}
+async function saveCue(){try{show('cueResult',await call('/api/versions/'+$('version').value+'/cues',{method:'POST',headers:auth(),body:$('cue').value}));refresh()}catch(e){$('cueResult').textContent=e.message}}
+async function addComment(){try{show('commentResult',await call('/api/versions/'+$('version').value+'/comments',{method:'POST',headers:auth(),body:JSON.stringify({time_ms:+$('time').value,body:$('comment').value})}));refresh()}catch(e){$('commentResult').textContent=e.message}}
+async function action(name){try{show('stateResult',await call('/api/versions/'+$('version').value+'/'+name,{method:'POST',headers:auth(),body:'{}'}));refresh()}catch(e){$('stateResult').textContent=e.message+(e.payload&&e.payload.conflicts?'\n'+'必须先修改以下字幕：\n'+e.payload.conflicts.map(c=>`#${c.cue_index}「${c.text}」 ${c.reason}`).join('\n'):'')}}
+async function review(decision){try{show('stateResult',await call('/api/versions/'+$('version').value+'/review',{method:'POST',headers:auth(),body:JSON.stringify({decision,comment:''})}));refresh()}catch(e){$('stateResult').textContent=e.message+(e.payload&&e.payload.conflicts?'\n'+'复核被挡住，请修改：\n'+e.payload.conflicts.map(c=>`#${c.cue_index}「${c.text}」 ${c.reason}`).join('\n'):'')}}
+async function createRevision(){
+  try{const r=await call('/api/projects/'+$('projectId').value+'/versions',{method:'POST',headers:auth(),body:JSON.stringify({language:$('revLang').value,parent_id:+$('parentId').value})});
+    $('version').value=r.id;alert('已创建修订版本 '+r.id);refresh()}
+  catch(e){alert(e.message)}
+}
+async function showDelivery(id){try{show('stateResult',await call('/api/deliveries/'+id))}catch(e){$('stateResult').textContent=e.message}}
+
+function renderConflicts(c){
+  const tag=$('conflictTag');tag.textContent=c.blocked?`${c.count} 处冲突 · 已挡住提交/复核/交付`:'无冲突';tag.className='tag '+(c.blocked?'blocked':'ok');
+  if(!c.blocked){$('conflicts').innerHTML='<small>当前版本字幕符合术语表（基线修订 ' + c.baseline_glossary_revision + ' / 当前修订 ' + c.current_glossary_revision + '）。</small>';return}
+  $('conflicts').innerHTML='<table><tr><th>序号</th><th>字幕句子</th><th>问题</th></tr>'+
+    c.conflicts.map(x=>`<tr><td>${x.cue_index}</td><td>${escapeHtml(x.text)}</td><td>${escapeHtml(x.reason)}</td></tr>`).join('')+'</table>';
+}
+function renderGlossary(g){
+  if(!g.revisions.length){$('glossaryHistory').innerHTML='<small>暂无术语</small>';return}
+  $('glossaryHistory').innerHTML='<table><tr><th>修订</th><th>时间</th><th>术语</th></tr>'+
+    g.revisions.slice().reverse().map(r=>`<tr><td>#${r.revision_no}${r.revision_no===g.current_revision_no?' <span class="tag ok">当前</span>':''}</td><td><small>${r.created_at}<br>${escapeHtml(r.created_by)}</small></td><td>${r.terms.map(t=>`${escapeHtml(t.source_term)} → ${escapeHtml(t.required_translation)}${t.forbidden_terms.length?` <small class="muted">禁用:${t.forbidden_terms.map(escapeHtml).join('/')}</small>`:''}`).join('<br>')}</td></tr>`).join('')+'</table>';
+}
+function renderLineage(l){
+  $('lineage').innerHTML='<table><tr><th>版本</th><th>语言</th><th>状态</th><th>术语基线</th><th>交付快照</th><th></th></tr>'+
+    l.nodes.map(n=>`<tr><td>#${n.version_no} (id=${n.id})${n.parent_id?' <small class="muted">←'+n.parent_id+'</small>':''}</td><td>${n.language}</td><td>${n.status}</td><td>${n.baseline_glossary_revision}</td><td>${n.delivery_id?`<small>#${n.delivery_id} 术语修订${n.pinned_glossary_revision}<br>${n.snapshot_hash.slice(0,12)}…</small>`:'—'}</td><td>${n.delivery_id?`<button onclick="showDelivery(${n.delivery_id})">查旧内容</button>`:''}</td></tr>`).join('')+'</table>'+
+    `<small class="muted">同一来源未完成记录：${l.unfinished_count} 条</small>`;
+}
+function renderDeliveries(list){
+  if(!list.length){$('deliveries').innerHTML='<small>暂无交付</small>';return}
+  $('deliveries').innerHTML='<table><tr><th>ID</th><th>版本</th><th>术语修订</th><th>哈希</th><th></th></tr>'+
+    list.map(d=>`<tr><td>${d.id}</td><td>${d.version_id}</td><td>${d.glossary_revision}</td><td><small>${d.snapshot_hash.slice(0,12)}…</small></td><td><button onclick="showDelivery(${d.id})">查看快照</button></td></tr>`).join('')+'</table>';
+}
+const escapeHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function refresh(){
+  const pid=$('projectId').value,vid=$('version').value;
+  try{
+    const [p,v,c,cm,d,cf,ln,g]=await Promise.all([
+      '/api/projects','/api/versions','/api/versions/'+vid+'/cues','/api/versions/'+vid+'/comments',
+      '/api/deliveries','/api/versions/'+vid+'/conflicts','/api/versions/'+vid+'/lineage','/api/projects/'+pid+'/glossary'
+    ].map(call));
+    show('data',{projects:p.projects,versions:v.versions,cues:c.cues,comments:cm.comments});
+    renderConflicts(cf);renderLineage(ln);renderDeliveries(d.deliveries);renderGlossary(g);
+  }catch(e){$('data').textContent=e.message}
+}
+refresh();
 </script></body></html>
